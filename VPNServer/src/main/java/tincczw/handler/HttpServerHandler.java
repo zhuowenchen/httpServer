@@ -10,7 +10,7 @@ public class HttpServerHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if( msg instanceof HttpRequest){
             HttpRequest request = (HttpRequest) msg;
-
+            int a = 0;
         }
     }
 }
