@@ -1,14 +1,19 @@
 package tincczw;
 
+import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.codec.http.HttpRequestDecoder;
-import io.netty.handler.codec.http.HttpResponseEncoder;
-import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.http.*;
 import tincczw.handler.HttpServerHandler;
+
+import java.net.InetSocketAddress;
+import java.net.URI;
 
 public class ProxyServer {
 
@@ -16,21 +21,52 @@ public class ProxyServer {
     private NioEventLoopGroup serverBossGroup;
 
     public ProxyServer(){
-        serverBossGroup = new NioEventLoopGroup();
+
         serverWorkerGroup = new NioEventLoopGroup();
+        serverBossGroup = new NioEventLoopGroup();
     }
 
-    private void init(){
-        ServerBootstrap serverBootstrap = new ServerBootstrap();
-        serverBootstrap.group(serverBossGroup,serverWorkerGroup).channel(NioServerSocketChannel.class).childHandler( new ChannelInitializer<SocketChannel>(){
-            @Override
-            protected void initChannel(SocketChannel socketChannel) throws Exception {
-                socketChannel.pipeline().addLast(new HttpResponseEncoder());
-                socketChannel.pipeline().addLast(new HttpRequestDecoder());
-                socketChannel.pipeline().addLast(new HttpServerHandler());
-                socketChannel.pipeline().addLast(new HttpServerCodec());
-            }
+    private void init() throws Exception{
+        try{
+            ServerBootstrap serverBootstrap = new ServerBootstrap();
+            serverBootstrap.group(serverBossGroup,serverWorkerGroup).channel(NioServerSocketChannel.class).localAddress(new InetSocketAddress(8090)).childHandler(
+                    new ChannelInitializer<SocketChannel>(){
+                        @Override
+                        protected void initChannel(SocketChannel socketChannel) throws Exception {
+                           socketChannel.pipeline().addLast("codec",new HttpServerCodec());
+                           socketChannel.pipeline().addLast("aggregator",new HttpObjectAggregator(1048567));
+                            socketChannel.pipeline().addLast("handler",new HttpServerHandler());
+                        }
+                    }
+            ).option(ChannelOption.SO_KEEPALIVE, true);
+
+            ChannelFuture f = serverBootstrap.bind().sync();
+           /* URI uri = new URI("http://127.0.0.1:8080");
+
+            DefaultFullHttpRequest defaultFullHttpRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1,HttpMethod.GET,uri.toASCIIString());
+            defaultFullHttpRequest.headers().set(HttpHeaders.Names.HOST,"127.0.0.1");
+            defaultFullHttpRequest.headers().set(HttpHeaders.Names.CONNECTION,HttpHeaders.Values.KEEP_ALIVE);
+            f.channel().writeAndFlush(defaultFullHttpRequest);*/
+
+            f.channel().closeFuture().sync();
+        }catch (Exception e){
+            e.printStackTrace();
         }
-        );
+        finally {
+
+            serverBossGroup.shutdownGracefully();
+            serverWorkerGroup.shutdownGracefully();
+
+        }
+    }
+
+    public static void main(String[] args) {
+
+        ProxyServer proxyServer = new ProxyServer();
+        try{
+            proxyServer.init();
+        }catch (Exception e){
+            e.printStackTrace();
+        }
     }
 }
