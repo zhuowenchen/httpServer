@@ -8,10 +8,11 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.*;
 import io.netty.util.CharsetUtil;
 
+import java.net.URI;
 import java.nio.ByteBuffer;
 
 public class HttpServerHandler extends ChannelInboundHandlerAdapter {
-    private String remoteHost = "www.scau.edu.cn";
+    private String remoteHost = "www.sysu.edu.cn";
     private int remotePort = 80;
 
     private Channel outBoundChannel;
@@ -25,6 +26,13 @@ public class HttpServerHandler extends ChannelInboundHandlerAdapter {
     }
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+        if(msg instanceof HttpRequest){
+            System.out.println(((HttpRequest) msg).getUri());
+            System.out.println(((HttpRequest) msg).getMethod());
+            System.out.println(((HttpRequest) msg).getProtocolVersion());
+            System.out.println(((HttpRequest) msg).headers().get("Host"));
+            System.out.println("收到HTTP请求");
+        }
         if(outBoundChannel==null || !ctx.channel().isActive()){
             Bootstrap bootstrap = new Bootstrap();
             bootstrap.group(ctx.channel().eventLoop())
@@ -47,7 +55,12 @@ public class HttpServerHandler extends ChannelInboundHandlerAdapter {
                 @Override
                 public void operationComplete(ChannelFuture future) throws Exception {
                     if (future.isSuccess()) {
-                        future.channel().writeAndFlush(msg);
+                         URI uri = new URI("/");
+
+            DefaultFullHttpRequest defaultFullHttpRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1,HttpMethod.GET,uri.toASCIIString());
+            defaultFullHttpRequest.headers().set(HttpHeaders.Names.HOST,remoteHost);
+            defaultFullHttpRequest.headers().set(HttpHeaders.Names.CONNECTION,HttpHeaders.Values.KEEP_ALIVE);
+                        future.channel().writeAndFlush(defaultFullHttpRequest);
                     } else {
                         future.channel().close();
                     }
@@ -56,7 +69,10 @@ public class HttpServerHandler extends ChannelInboundHandlerAdapter {
             });
         }
        else {
-            outBoundChannel.writeAndFlush(msg);
+            HttpRequest request = (HttpRequest)msg;
+            request.headers().set(HttpHeaders.Names.HOST,remoteHost);
+            request.headers().set(HttpHeaders.Names.CONNECTION,HttpHeaders.Values.KEEP_ALIVE);
+            outBoundChannel.writeAndFlush(request);
         }
     }
 

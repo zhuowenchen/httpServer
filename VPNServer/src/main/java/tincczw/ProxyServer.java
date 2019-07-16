@@ -10,8 +10,10 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.*;
+import io.netty.handler.ssl.SslHandler;
 import tincczw.handler.HttpServerHandler;
 
+import javax.net.ssl.SSLEngine;
 import java.net.InetSocketAddress;
 import java.net.URI;
 
@@ -33,6 +35,8 @@ public class ProxyServer {
                     new ChannelInitializer<SocketChannel>(){
                         @Override
                         protected void initChannel(SocketChannel socketChannel) throws Exception {
+                           /* SSLEngine engine =
+                            socketChannel.pipeline().addLast("sslhandler",new SslHandler())*/
                            socketChannel.pipeline().addLast("codec",new HttpServerCodec());
                            socketChannel.pipeline().addLast("aggregator",new HttpObjectAggregator(1048567));
                             socketChannel.pipeline().addLast("handler",new HttpServerHandler());
