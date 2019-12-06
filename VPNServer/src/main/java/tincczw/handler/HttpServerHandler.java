@@ -2,20 +2,27 @@ package tincczw.handler;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.channel.*;
 
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.*;
 import io.netty.util.CharsetUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.net.URL;
 import java.nio.ByteBuffer;
 
 public class HttpServerHandler extends ChannelInboundHandlerAdapter {
-    private String remoteHost = "www.sysu.edu.cn";
-    private int remotePort = 80;
-
+    private String remoteHost ;
+    private int remotePort ;
+    private boolean isTunnel;
     private Channel outBoundChannel;
+    private boolean hasConnect;
+    ChannelFuture remoteConnectFuture;
+    private static Logger logger = LoggerFactory.getLogger(HttpServerHandler.class);
     public HttpServerHandler(){
         super();
     }
@@ -27,52 +34,35 @@ public class HttpServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         if(msg instanceof HttpRequest){
-            System.out.println(((HttpRequest) msg).getUri());
-            System.out.println(((HttpRequest) msg).getMethod());
-            System.out.println(((HttpRequest) msg).getProtocolVersion());
-            System.out.println(((HttpRequest) msg).headers().get("Host"));
             System.out.println("收到HTTP请求");
-        }
-        if(outBoundChannel==null || !ctx.channel().isActive()){
-            Bootstrap bootstrap = new Bootstrap();
-            bootstrap.group(ctx.channel().eventLoop())
-                    .channel(ctx.channel().getClass())
-                    .handler(new ChannelInitializer<SocketChannel>(){
-                        @Override
-                        protected void initChannel(SocketChannel ch)
-                                throws Exception {
-                            ChannelPipeline pipeline = ch.pipeline();
-                            pipeline.addLast("codec", new HttpClientCodec());
-                            pipeline.addLast("aggregator", new HttpObjectAggregator(1048576));
-                            pipeline.addLast(new NettyProxyClientHandler(ctx.channel()));
-                        }}).option(ChannelOption.SO_KEEPALIVE, true);
-            ChannelFuture future = bootstrap.connect(remoteHost,remotePort);
-            outBoundChannel = future.channel();
-            /* channel建立成功后,将请求发送给远程主机 */
-
-
-            future.addListener(new ChannelFutureListener(){
-                @Override
-                public void operationComplete(ChannelFuture future) throws Exception {
-                    if (future.isSuccess()) {
-                         URI uri = new URI("/");
-
-            DefaultFullHttpRequest defaultFullHttpRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1,HttpMethod.GET,uri.toASCIIString());
-            defaultFullHttpRequest.headers().set(HttpHeaders.Names.HOST,remoteHost);
-            defaultFullHttpRequest.headers().set(HttpHeaders.Names.CONNECTION,HttpHeaders.Values.KEEP_ALIVE);
-                        future.channel().writeAndFlush(defaultFullHttpRequest);
-                    } else {
-                        future.channel().close();
+            FullHttpRequest fullHttpRequest = (FullHttpRequest) msg;
+            if(remoteHost==null&&fullHttpRequest.getMethod()==HttpMethod.CONNECT){
+                String uri = fullHttpRequest.getUri();
+                if (!uri.startsWith("/")) {
+                    if(!uri.startsWith("http://")){
+                        uri = "http://" + uri;
                     }
                 }
+                System.out.println(uri);
+                URL url = new URL(uri);
+                remoteHost = url.getHost();
+                remotePort = url.getPort()!=-1?url.getPort():url.getDefaultPort();
 
-            });
-        }
-       else {
-            HttpRequest request = (HttpRequest)msg;
-            request.headers().set(HttpHeaders.Names.HOST,remoteHost);
-            request.headers().set(HttpHeaders.Names.CONNECTION,HttpHeaders.Values.KEEP_ALIVE);
-            outBoundChannel.writeAndFlush(request);
+            }
+            if(remoteHost!=null){
+                if(isTunnel){
+                    writeToRemote(fullHttpRequest);
+                } else{
+
+                    if(remoteConnectFuture == null){
+                        remoteConnectFuture = connectRemote(ctx);
+                    }
+                    if(!HttpMethod.CONNECT.equals(fullHttpRequest.getMethod())){
+                        remoteConnectFuture.addListener(future -> writeToRemote(fullHttpRequest));
+                    }
+
+                }
+            }
         }
     }
 
@@ -81,7 +71,47 @@ public class HttpServerHandler extends ChannelInboundHandlerAdapter {
         DefaultHttpRequest defaultHttpRequest = new DefaultHttpRequest(HttpVersion.HTTP_1_1,HttpMethod.GET,"/");
         ChannelFuture cl = ctx.writeAndFlush(defaultHttpRequest);
     }*/
+    private ChannelFuture connectRemote(final ChannelHandlerContext ctx){
+        Bootstrap bootstrap = new Bootstrap();
+        bootstrap.group(ctx.channel().eventLoop())
+                .channel(ctx.channel().getClass())
+                .handler(new ChannelInitializer<SocketChannel>(){
+                    @Override
+                    protected void initChannel(SocketChannel ch)
+                            throws Exception {
+                        outBoundChannel = ch;
+                        ChannelPipeline pipeline = ch.pipeline();
+                        pipeline.addLast("codec", new HttpClientCodec());
+                        pipeline.addLast("aggregator", new HttpObjectAggregator(1048576));
+                        pipeline.addLast(new NettyProxyClientHandler(ctx.channel()));
+                    }}).option(ChannelOption.SO_KEEPALIVE, true);
+        ChannelFuture future = bootstrap.connect(remoteHost,remotePort);
+        future.addListener(future1 -> {
+            if (future1.isSuccess()) {
+                isTunnel = true;
+                logger.info("连接成功: " + remoteHost + ":" + remotePort);
+            } else {
+                logger.error("连接失败: " + remoteHost + ":" + remotePort);
+            }
+        });
+        return future;
+    }
+    private void writeToRemote(FullHttpRequest httpRequest){
+        DefaultFullHttpRequest defaultFullHttpRequest;
+        if(httpRequest.content()!=null){
+            defaultFullHttpRequest = new DefaultFullHttpRequest(httpRequest.getProtocolVersion(),httpRequest.getMethod(),httpRequest.getUri(),httpRequest.content());
+        }
+       else{
+           defaultFullHttpRequest = new DefaultFullHttpRequest(httpRequest.getProtocolVersion(),httpRequest.getMethod(),httpRequest.getUri());
+        }
+       outBoundChannel.writeAndFlush(defaultFullHttpRequest).addListener(future -> {
+           if(future.isSuccess()){
 
+           }else{
+               logger.warn("Something wrong happen,can't write message");
+           }
+       });
+    }
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         super.exceptionCaught(ctx, cause);

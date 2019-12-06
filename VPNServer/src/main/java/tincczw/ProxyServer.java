@@ -44,7 +44,7 @@ public class ProxyServer {
                     }
             ).option(ChannelOption.SO_KEEPALIVE, true);
 
-            ChannelFuture f = serverBootstrap.bind().sync();
+            ChannelFuture f = serverBootstrap.bind(8080).sync();
            /* URI uri = new URI("http://127.0.0.1:8080");
 
             DefaultFullHttpRequest defaultFullHttpRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1,HttpMethod.GET,uri.toASCIIString());
